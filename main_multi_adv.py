@@ -32,10 +32,10 @@ if __name__ == '__main__':
     
     adv_attack = 'pc_i_fgsm'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool
     model_configs = [
-        (resnet50, './model/resnet50.pth', 0.4),
-        (resnet101, './model/resnet101.pth', 0.4),
-        (VGG, './model/vgg19.pth', 0.1),
-        (VisionTransformer, './model/vit.pth', 0.1)
+        (resnet50, './model/resnet50.pth', 0.7),
+        # (resnet101, './model/resnet101.pth', 0.4),
+        (VGG, './model/vgg19.pth', 0.3),
+        # (VisionTransformer, './model/vit.pth', 0.1)
     ]
     
     model_list = []
@@ -94,9 +94,9 @@ if __name__ == '__main__':
                 model_weights=model_weights,
                 input_image=input,
                 label=label,
-                epsilon=0.5,
-                alpha=0.05,
-                num_iterations=30
+                epsilon=0.6,
+                alpha=0.08,
+                num_iterations=20
             )
         elif adv_attack == 'fgsm':
             # FGSM Attack

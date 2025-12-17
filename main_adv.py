@@ -52,14 +52,28 @@ def get_model(model_name, num_classes=10):
 
 if __name__ == '__main__':
     adv_attack = 'pgd'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary
-    attack_model =  'cnn'  # cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+    attack_model =  'wide_resnet'  # cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
     model = get_model(attack_model, num_classes=10)
     
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))
-    ])
-    inv_transform = transforms.Normalize((-0.4914/0.2470, -0.4822/0.2435, -0.4465/0.2616), (1.0/0.2470, 1.0/0.2435, 1.0/0.2616))
+    if attack_model == 'wide_resnet':
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Resize((224, 224)),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))
+        ])
+        inv_transform = transforms.Compose([
+            transforms.Normalize((-0.4914/0.2470, -0.4822/0.2435, -0.4465/0.2616), (1.0/0.2470, 1.0/0.2435, 1.0/0.2616)),
+            transforms.Resize((32, 32))
+        ])
+    
+    else :
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))
+        ])
+        inv_transform = transforms.Compose([
+            transforms.Normalize((-0.4914/0.2470, -0.4822/0.2435, -0.4465/0.2616), (1.0/0.2470, 1.0/0.2435, 1.0/0.2616))
+        ])
 
     clean_folder = "./data/cifar10_clean_500/"
     clean_image_folder = os.path.join(clean_folder, 'images/')
