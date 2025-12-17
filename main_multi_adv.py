@@ -94,7 +94,7 @@ if __name__ == '__main__':
                 model_weights=model_weights,
                 input_image=input,
                 label=label,
-                epsilon=0.4,
+                epsilon=0.5,
                 alpha=0.05,
                 num_iterations=30
             )

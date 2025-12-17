@@ -6,6 +6,8 @@ import torch.optim as optim
 from torchvision import datasets, transforms, models
 from torch.utils.data import DataLoader
 
+from utils import pgd_attack
+
 
 def load_data(batch_size=256):
     transform_train = transforms.Compose([
@@ -27,8 +29,8 @@ def load_data(batch_size=256):
     train_dataset = datasets.CIFAR10(root='./data', train=True, download=False, transform=transform_train)
     test_dataset = datasets.CIFAR10(root='./data', train=False, download=False, transform=transform_test)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
 
     return train_loader, test_loader
 
@@ -79,6 +81,7 @@ if __name__ == '__main__':
         for images, labels in train_loader:
             images, labels = images.cuda(), labels.cuda()
 
+            # 1. 原始样本训练
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -90,7 +93,21 @@ if __name__ == '__main__':
             train_correct += (predicted == labels).sum().item()
             total += len(labels)
 
-        train_loss /= len(train_loader)
+            # 2. PGD对抗样本训练
+            optimizer.zero_grad()
+            
+            adv_images = pgd_attack(model, images, labels, criterion, epsilon=0.5, alpha=0.05, steps=20)
+            adv_outputs = model(adv_images)
+            adv_loss = criterion(adv_outputs, labels)
+            adv_loss.backward()
+            optimizer.step()
+            
+            train_loss += adv_loss.item()
+            _, adv_predicted = torch.max(adv_outputs.data, 1)
+            train_correct += (adv_predicted == labels).sum().item()
+            total += len(labels)
+
+        train_loss /= len(train_loader) * 2
         train_accuracy = 100.0 * train_correct / total
         print(f"    Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.2f}%")
 
@@ -122,6 +139,6 @@ if __name__ == '__main__':
         print(f"    Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
 
         if test_accuracy > best_accuracy:
-            torch.save(model.state_dict(), f'./model/wide_resnet.pth')
+            torch.save(model.state_dict(), f'./model/wide_resnet_at.pth')
             best_accuracy = test_accuracy
             print(f"    Best model saved! New best accuracy: {best_accuracy:.2f}%")

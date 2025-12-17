@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torchvision import models
 
 import math
 import collections.abc
@@ -182,6 +183,13 @@ def resnet101(num_classes=1000):
 
 def resnet152(num_classes=1000):
     return ResNet(Bottleneck, [3, 8, 36, 3], num_classes)
+
+
+def wide_resnet(num_classes=1000):
+    model = models.wide_resnet50_2()
+    in_features = model.fc.in_features
+    model.fc = nn.Linear(in_features, 10)
+    return model
 
 
 class VGG(nn.Module):

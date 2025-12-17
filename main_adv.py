@@ -23,14 +23,37 @@ from attacks.CW import CW
 from attacks.boundary_attack import BoundaryAttack
 
 from model import CNN, VGG, VisionTransformer
-from model import resnet18, resnet34, resnet50, resnet101, resnet152
+from model import resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
 
+
+def get_model(model_name, num_classes=10):
+    if model_name == 'cnn':
+        model = CNN(num_classes=num_classes)
+    elif model_name == 'vgg19':
+        model = VGG(num_classes=num_classes)
+    elif model_name == 'vit':
+        model = VisionTransformer(num_classes=num_classes)
+    elif model_name == 'resnet18':
+        model = resnet18(num_classes=num_classes)
+    elif model_name == 'resnet34':
+        model = resnet34(num_classes=num_classes)
+    elif model_name == 'resnet50':
+        model = resnet50(num_classes=num_classes)
+    elif model_name == 'resnet101':
+        model = resnet101(num_classes=num_classes)
+    elif model_name == 'resnet152':
+        model = resnet152(num_classes=num_classes)
+    elif model_name == 'wide_resnet':
+        model = wide_resnet(num_classes=num_classes)
+
+    model.load_state_dict(torch.load(f'./model/{model_name}.pth', map_location=torch.device('cpu')))
+
+    return model
 
 if __name__ == '__main__':
-    adv_attack = 'pc_i_fgsm'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary
-
-    model = resnet50(num_classes=10)
-    model.load_state_dict(torch.load('./model/resnet50.pth', map_location=torch.device('cpu')))
+    adv_attack = 'pgd'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary
+    attack_model =  'cnn'  # cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+    model = get_model(attack_model, num_classes=10)
     
     transform = transforms.Compose([
         transforms.ToTensor(),
