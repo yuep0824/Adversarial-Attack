@@ -17,7 +17,7 @@ sys.path.append(".")
 
 from attacks.FGSM import fgsm_attack
 from attacks.PC_I_FGSM import pc_i_fgsm_attack
-from attacks.PGD import pgd_attack
+from attacks.PGD import pgd_attack, multi_restart_pgd_attack, nes_pgd_attack, cw_pgd_hybrid_attack
 from attacks.DeepFool import deepfool_attack
 from attacks.CW import CW
 from attacks.boundary_attack import BoundaryAttack
@@ -51,7 +51,7 @@ def get_model(model_name, num_classes=10):
     return model
 
 if __name__ == '__main__':
-    adv_attack = 'pgd'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary
+    adv_attack = 'cw_pgd_hybrid_attack'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary, nes_pgd_attack, multi_restart_pgd, cw_pgd_hybrid_attack
     attack_model =  'resnet50'  # cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
     model = get_model(attack_model, num_classes=10)
     
@@ -109,7 +109,13 @@ if __name__ == '__main__':
         elif adv_attack == 'pc_i_fgsm':
             adversarial_tensor = pc_i_fgsm_attack(model, input, label, epsilon=0.1)
         elif adv_attack == 'pgd':
-            adversarial_tensor = pgd_attack(model, input, label, epsilon=0.5, alpha=0.05, num_iterations=50)
+            adversarial_tensor = pgd_attack(model, input, label, epsilon=0.8, alpha=0.08, num_iterations=50)
+        elif adv_attack == 'multi_restart_pgd':
+            adversarial_tensor = multi_restart_pgd_attack(model, input, label, epsilon=0.5, alpha=0.05, num_iterations=20)
+        elif adv_attack == 'nes_pgd_attack':
+           adversarial_tensor = nes_pgd_attack(model, input, label, epsilon=0.8, alpha=0.1, num_iterations=20)
+        elif adv_attack == 'cw_pgd_hybrid_attack':
+            adversarial_tensor = cw_pgd_hybrid_attack(model, input, label, epsilon=0.8, alpha=0.1, num_iterations=30, kappa=0.2)
         elif adv_attack == 'deepfool':
             adversarial_tensor, _ = deepfool_attack(model, input, label, overshoot=0.1, max_iter=50)
         elif adv_attack == 'cw':
