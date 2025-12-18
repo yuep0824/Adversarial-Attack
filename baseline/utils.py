@@ -25,6 +25,25 @@ def load_data(batch_size=64):
     return train_loader, test_loader
 
 
+
+def fgsm_attack(model, input_image, label, criterion, epsilon=0.2):
+    adv_images = input_image.clone().detach().to(input_image.device)
+    adv_images.requires_grad = True
+
+    model.eval()
+
+    output = model(adv_images)
+    loss = criterion(output, label)
+    model.zero_grad()
+    loss.backward()
+
+    gradient = adv_images.grad.data.sign()
+    adv_images = torch.clamp(adv_images + epsilon * gradient, input_image.min(), input_image.max())
+
+    return adv_images.detach()
+
+
+
 def pgd_attack(model, images, labels, criterion, epsilon=0.01, alpha=0.002, steps=10, clamp_min=0.0, clamp_max=1.0):
     adv_images = images.clone().detach().to(images.device)
     adv_images.requires_grad = True

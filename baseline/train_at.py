@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from utils import load_data, pgd_attack
+from utils import load_data, pgd_attack, fgsm_attack
 from models import CNN, VGG, ViT
 from models import resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
 
@@ -43,7 +43,7 @@ if __name__ == "__main__":
 
     num_epochs = 200
     num_adv_epochs = 100
-    adv_sample_ratio = 0.1 
+    adv_sample_ratio = 0.05
     best_accuracy = 0.0
     for epoch in tqdm(range(num_epochs), desc="Training"):
         print(f"Epoch {epoch+1}/{num_epochs}:")
@@ -55,8 +55,7 @@ if __name__ == "__main__":
         adv_loss = 0.0
         adv_correct = 0
         adv_total = 0
-        
-        
+
         if epoch == num_adv_epochs - 1:
             torch.save(model.state_dict(), f'./model/{model_name}_pre_at.pth')
 
@@ -68,6 +67,7 @@ if __name__ == "__main__":
             outputs = model(images)
             loss = criterion(outputs, labels)
             loss.backward()
+            optimizer.step()
 
             train_loss += loss.item()
             _, predicted = torch.max(outputs.data, 1)
@@ -82,17 +82,17 @@ if __name__ == "__main__":
                 selected_images = images[adv_indices]
                 selected_labels = labels[adv_indices]
                 
-                adv_images = pgd_attack(model, selected_images, selected_labels, criterion, epsilon=0.2, alpha=0.04, steps=10)
+                adv_images = fgsm_attack(model, selected_images, selected_labels, criterion, epsilon=0.3)
                 adv_outputs = model(adv_images)
                 loss = criterion(adv_outputs, selected_labels)
                 loss.backward()
+                optimizer.step()
 
                 adv_loss += loss.item()
                 _, adv_predicted = torch.max(adv_outputs.data, 1)
                 adv_correct += (adv_predicted != selected_labels).sum().item()
                 adv_total += len(selected_labels)
             
-            optimizer.step()
 
         train_loss /= len(train_loader)
         train_accuracy = 100.0 * train_correct / total
