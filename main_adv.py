@@ -22,8 +22,8 @@ from attacks.DeepFool import deepfool_attack
 from attacks.CW import CW
 from attacks.boundary_attack import BoundaryAttack
 
-from model import CNN, VGG, VisionTransformer
-from model import resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+from baseline.models import CNN, VGG, ViT
+from baseline.models import resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
 
 
 def get_model(model_name, num_classes=10):
@@ -32,7 +32,7 @@ def get_model(model_name, num_classes=10):
     elif model_name == 'vgg19':
         model = VGG(num_classes=num_classes)
     elif model_name == 'vit':
-        model = VisionTransformer(num_classes=num_classes)
+        model = ViT(num_classes=num_classes)
     elif model_name == 'resnet18':
         model = resnet18(num_classes=num_classes)
     elif model_name == 'resnet34':

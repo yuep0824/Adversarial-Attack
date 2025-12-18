@@ -414,7 +414,7 @@ class Block(nn.Module):
         return x
 
 
-class VisionTransformer(nn.Module):
+class ViT(nn.Module):
     def __init__(
         self,
         img_size=32,

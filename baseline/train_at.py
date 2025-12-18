@@ -5,50 +5,45 @@ import torch.nn as nn
 import torch.optim as optim
 
 from utils import load_data, pgd_attack
+from models import CNN, VGG, ViT
+from models import resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
 
 
-class CNN(nn.Module):
-    def __init__(self, num_classes=10):
-        super(CNN, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(16, 16, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-
-            nn.Conv2d(16, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-        )
-        
-        self.classifier = nn.Sequential(
-            nn.Linear(64 * 8 * 8, 512),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(512, num_classes)
-        )
-
-    def forward(self, x):
-        x = self.features(x)
-        x = x.view(-1, 64 * 8 * 8)
-        x = self.classifier(x)
-        
-        return x
+def get_model(model_name, num_classes=10):
+    if model_name == 'cnn':
+        model = CNN(num_classes=num_classes)
+    elif model_name == 'vgg19':
+        model = VGG(num_classes=num_classes)
+    elif model_name == 'vit':
+        model = ViT(num_classes=num_classes)
+    elif model_name == 'resnet18':
+        model = resnet18(num_classes=num_classes)
+    elif model_name == 'resnet34':
+        model = resnet34(num_classes=num_classes)
+    elif model_name == 'resnet50':
+        model = resnet50(num_classes=num_classes)
+    elif model_name == 'resnet101':
+        model = resnet101(num_classes=num_classes)
+    elif model_name == 'resnet152':
+        model = resnet152(num_classes=num_classes)
+    elif model_name == 'wide_resnet':
+        model = wide_resnet(num_classes=num_classes)
     
+    return model
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     train_loader, test_loader = load_data(batch_size=256)
 
-    model = CNN().cuda()
+    model_name = 'cnn'  # 可选：cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+    model = get_model(model_name, num_classes=10).cuda()
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=5e-5)
 
     num_epochs = 200
     num_adv_epochs = 100
+    adv_sample_ratio = 0.1 
     best_accuracy = 0.0
     for epoch in tqdm(range(num_epochs), desc="Training"):
         print(f"Epoch {epoch+1}/{num_epochs}:")
@@ -61,6 +56,10 @@ if __name__ == '__main__':
         adv_correct = 0
         adv_total = 0
         
+        
+        if epoch == num_adv_epochs - 1:
+            torch.save(model.state_dict(), f'./model/{model_name}_pre_at.pth')
+
         for images, labels in train_loader:
             images, labels = images.cuda(), labels.cuda()
             
@@ -69,27 +68,31 @@ if __name__ == '__main__':
             outputs = model(images)
             loss = criterion(outputs, labels)
             loss.backward()
-            optimizer.step()
 
             train_loss += loss.item()
             _, predicted = torch.max(outputs.data, 1)
             train_correct += (predicted == labels).sum().item()
             total += len(labels)
             
-            if epoch >= num_adv_epochs:
-                # 2. PGD对抗样本训练    
-                optimizer.zero_grad()
+            # 2. PGD对抗样本训练  
+            if epoch >= num_adv_epochs:  
+                # 随机选择指定比例的样本索引
+                batch_size = images.shape[0]
+                adv_indices = torch.randperm(batch_size)[:int(batch_size * adv_sample_ratio)]
+                selected_images = images[adv_indices]
+                selected_labels = labels[adv_indices]
                 
-                adv_images = pgd_attack(model, images, labels, criterion, epsilon=0.5, alpha=0.05, steps=20)
+                adv_images = pgd_attack(model, selected_images, selected_labels, criterion, epsilon=0.2, alpha=0.04, steps=10)
                 adv_outputs = model(adv_images)
-                adv_loss = criterion(adv_outputs, labels)
-                adv_loss.backward()
-                optimizer.step()
-                
-                adv_loss += adv_loss.item()
+                loss = criterion(adv_outputs, selected_labels)
+                loss.backward()
+
+                adv_loss += loss.item()
                 _, adv_predicted = torch.max(adv_outputs.data, 1)
-                adv_correct += (adv_predicted == labels).sum().item()
-                adv_total += len(labels)
+                adv_correct += (adv_predicted != selected_labels).sum().item()
+                adv_total += len(selected_labels)
+            
+            optimizer.step()
 
         train_loss /= len(train_loader)
         train_accuracy = 100.0 * train_correct / total
@@ -106,6 +109,7 @@ if __name__ == '__main__':
                 param_group['lr'] *= 0.8
 
 
+        # 评估模型
         model.eval()
         test_loss = 0.0
         test_correct = 0
@@ -130,5 +134,5 @@ if __name__ == '__main__':
         print(f"    Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
 
         if test_accuracy > best_accuracy:
-            torch.save(model.state_dict(), f'./model/cnn_at.pth')
+            torch.save(model.state_dict(), f'./model/{model_name}.pth')
             best_accuracy = test_accuracy

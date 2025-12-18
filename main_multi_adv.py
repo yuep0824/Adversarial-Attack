@@ -22,8 +22,8 @@ from attacks.DeepFool import deepfool_attack, multi_model_deepfool_attack
 from attacks.CW import CW
 from attacks.boundary_attack import BoundaryAttack
 
-from model import CNN, VGG, VisionTransformer
-from model import resnet18, resnet34, resnet50, resnet101, resnet152
+from baseline.models import CNN, VGG, ViT
+from baseline.models import resnet18, resnet34, resnet50, resnet101, resnet152
 
 
 if __name__ == '__main__':
@@ -35,7 +35,7 @@ if __name__ == '__main__':
         (resnet50, './model/resnet50.pth', 0.7),
         # (resnet101, './model/resnet101.pth', 0.4),
         (VGG, './model/vgg19.pth', 0.3),
-        # (VisionTransformer, './model/vit.pth', 0.1)
+        # (ViT, './model/vit.pth', 0.1)
     ]
     
     model_list = []

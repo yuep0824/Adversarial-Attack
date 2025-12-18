@@ -6,43 +6,38 @@ import torch.optim as optim
 
 from utils import load_data
 
+from baseline.models import CNN, VGG, VisionTransformer
+from baseline.models import resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
 
-class CNN(nn.Module):
-    def __init__(self, num_classes=10):
-        super(CNN, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(16, 16, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
 
-            nn.Conv2d(16, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-        )
-        
-        self.classifier = nn.Sequential(
-            nn.Linear(64 * 8 * 8, 512),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(512, num_classes)
-        )
-
-    def forward(self, x):
-        x = self.features(x)
-        x = x.view(-1, 64 * 8 * 8)
-        x = self.classifier(x)
-        
-        return x
+def get_model(model_name, num_classes=10):
+    if model_name == 'cnn':
+        model = CNN(num_classes=num_classes)
+    elif model_name == 'vgg19':
+        model = VGG(num_classes=num_classes)
+    elif model_name == 'vit':
+        model = VisionTransformer(num_classes=num_classes)
+    elif model_name == 'resnet18':
+        model = resnet18(num_classes=num_classes)
+    elif model_name == 'resnet34':
+        model = resnet34(num_classes=num_classes)
+    elif model_name == 'resnet50':
+        model = resnet50(num_classes=num_classes)
+    elif model_name == 'resnet101':
+        model = resnet101(num_classes=num_classes)
+    elif model_name == 'resnet152':
+        model = resnet152(num_classes=num_classes)
+    elif model_name == 'wide_resnet':
+        model = wide_resnet(num_classes=num_classes)
     
+    return model
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     train_loader, test_loader = load_data(batch_size=256)
 
-    model = CNN().cuda()
+    model_name = 'cnn'  # 可选：cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+    model = get_model(model_name, num_classes=10).cuda()
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=5e-5)
@@ -105,5 +100,5 @@ if __name__ == '__main__':
         print(f"    Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
 
         if test_accuracy > best_accuracy:
-            torch.save(model.state_dict(), f'./model/cnn.pth')
+            torch.save(model.state_dict(), f'./model/{model_name}.pth')
             best_accuracy = test_accuracy
