@@ -52,7 +52,7 @@ def get_model(model_name, num_classes=10):
 
 if __name__ == '__main__':
     adv_attack = 'pgd'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary
-    attack_model =  'wide_resnet'  # cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+    attack_model =  'resnet50'  # cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
     model = get_model(attack_model, num_classes=10)
     
     if attack_model == 'wide_resnet':
