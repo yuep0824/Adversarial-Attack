@@ -145,10 +145,14 @@ def multi_model_pgd_attack(
     alpha=0.05,          # 单次迭代步长
     num_iterations=50    # 迭代次数
 ):
+    # 注意力机制参数（内部默认，不暴露接口）
+    attention_ratio = 0.2  # 关注梯度最大的20%像素（可调整）
+    
     valid_models = []
     valid_weights = []
     input_ori = input_image.clone().detach()
     
+    # 1. 筛选分类正确的有效模型（保留原逻辑）
     for idx, model in enumerate(model_list):
         model.eval()
         with torch.no_grad():
@@ -162,25 +166,100 @@ def multi_model_pgd_attack(
         print(f"警告：当前样本无分类正确的模型，返回原始图像")
         return input_image
     
-    valid_weights = torch.tensor(valid_weights, dtype=torch.float32)
-    valid_weights = valid_weights / valid_weights.sum()
+    valid_weights = torch.tensor(valid_weights, dtype=torch.float32, device=input_image.device)
+    valid_weights = valid_weights / valid_weights.sum()  # 权重归一化
     
-    # PGD核心迭代（融合多模型梯度）
+    # 2. 预计算固定的注意力掩码（仅计算一次，核心修改）
+    adv_image_init = input_image.clone().detach().requires_grad_(True)
+    fusion_gradient_init = torch.zeros_like(adv_image_init)
+    
+    # 2.1 计算初始的多模型融合梯度
+    for idx, model in enumerate(valid_models):
+        model.zero_grad()
+        output = model(adv_image_init)
+        loss = nn.CrossEntropyLoss()(output, label)
+        loss.backward()
+        fusion_gradient_init += valid_weights[idx] * adv_image_init.grad.data.sign()
+    
+    # 2.2 生成固定的注意力掩码（仅基于初始梯度）
+    grad_abs = torch.abs(fusion_gradient_init)
+    grad_flat = grad_abs.view(grad_abs.shape[0], -1)
+    k = int(grad_flat.shape[1] * attention_ratio)
+    k = max(k, 1)  # 避免k=0
+    threshold = torch.kthvalue(grad_flat, grad_flat.shape[1] - k, dim=1)[0]
+    threshold = threshold.unsqueeze(1).unsqueeze(2).unsqueeze(3)
+    attention_mask = (grad_abs >= threshold).float()  # 固定mask，后续不再修改
+    attention_mask = attention_mask.detach()  # 解除梯度追踪
+    
+    # 3. PGD核心迭代（复用固定的注意力掩码）
     adv_image = input_image.clone()
     for _ in range(num_iterations):
         adv_image = adv_image.clone().detach().requires_grad_(True)
         fusion_gradient = torch.zeros_like(adv_image)
         
+        # 3.1 计算当前迭代的多模型融合梯度
         for idx, model in enumerate(valid_models):
             model.zero_grad()
             output = model(adv_image)
             loss = nn.CrossEntropyLoss()(output, label)
             loss.backward()
-            
             fusion_gradient += valid_weights[idx] * adv_image.grad.data.sign()
         
-        adv_image = adv_image + alpha * fusion_gradient.sign()
-        adv_image = torch.clamp(adv_image, input_image - epsilon, input_image + epsilon)
+        # 3.2 复用固定的注意力掩码施加扰动（核心修改）
+        perturbation = alpha * fusion_gradient.sign() * attention_mask
+        
+        # 3.3 投影约束（保留原逻辑）
+        adv_image = adv_image + perturbation
+        adv_image = torch.clamp(adv_image, input_ori - epsilon, input_ori + epsilon)
         adv_image = adv_image.detach()
     
     return adv_image
+    
+# def multi_model_pgd_attack(
+#     model_list,          # 参与攻击的模型列表
+#     model_weights,       # 各模型的梯度权重（与model_list一一对应）
+#     input_image,         # 输入图像张量
+#     label,               # 真实标签
+#     epsilon=0.5,         # PGD扰动上限
+#     alpha=0.05,          # 单次迭代步长
+#     num_iterations=50    # 迭代次数
+# ):
+#     valid_models = []
+#     valid_weights = []
+#     input_ori = input_image.clone().detach()
+    
+#     for idx, model in enumerate(model_list):
+#         model.eval()
+#         with torch.no_grad():
+#             output = model(input_ori)
+#             pred_label = torch.argmax(output, dim=1)
+#             if pred_label == label:
+#                 valid_models.append(model)
+#                 valid_weights.append(model_weights[idx])
+    
+#     if len(valid_models) == 0:
+#         print(f"警告：当前样本无分类正确的模型，返回原始图像")
+#         return input_image
+    
+#     valid_weights = torch.tensor(valid_weights, dtype=torch.float32)
+#     valid_weights = valid_weights / valid_weights.sum()
+    
+#     # PGD核心迭代（融合多模型梯度）
+#     adv_image = input_image.clone()
+#     for _ in range(num_iterations):
+#         adv_image = adv_image.clone().detach().requires_grad_(True)
+#         fusion_gradient = torch.zeros_like(adv_image)
+        
+#         for idx, model in enumerate(valid_models):
+#             model.zero_grad()
+#             output = model(adv_image)
+#             loss = nn.CrossEntropyLoss()(output, label)
+#             loss.backward()
+            
+#             fusion_gradient += valid_weights[idx] * adv_image.grad.data.sign()
+        
+#         adv_image = adv_image + alpha * fusion_gradient.sign()
+#         adv_image = torch.clamp(adv_image, input_image - epsilon, input_image + epsilon)
+#         adv_image = adv_image.detach()
+    
+#     return adv_image

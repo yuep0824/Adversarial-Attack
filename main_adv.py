@@ -51,10 +51,16 @@ def get_model(model_name, num_classes=10):
     return model
 
 if __name__ == '__main__':
-    adv_attack = 'cw_pgd_hybrid_attack'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary, nes_pgd_attack, multi_restart_pgd, cw_pgd_hybrid_attack
+    adv_attack = 'pgd'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary, nes_pgd_attack, multi_restart_pgd, cw_pgd_hybrid_attack
     attack_model =  'resnet50'  # cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
-    model = get_model(attack_model, num_classes=10)
-    
+    # model = get_model(attack_model, num_classes=10)
+
+    from torchvision import models
+    model = models.resnet50(pretrained=True)
+    num_ftrs = model.fc.in_features
+    model.fc = nn.Linear(num_ftrs, 10) 
+    model.load_state_dict(torch.load(f'resnet50_cifar10_finetuned_fc.pth', map_location=torch.device('cpu')))
+
     if attack_model == 'wide_resnet':
         transform = transforms.Compose([
             transforms.ToTensor(),
@@ -109,7 +115,7 @@ if __name__ == '__main__':
         elif adv_attack == 'pc_i_fgsm':
             adversarial_tensor = pc_i_fgsm_attack(model, input, label, epsilon=0.1)
         elif adv_attack == 'pgd':
-            adversarial_tensor = pgd_attack(model, input, label, epsilon=0.8, alpha=0.08, num_iterations=50)
+            adversarial_tensor = pgd_attack(model, input, label, epsilon=0.6, alpha=0.08, num_iterations=20)
         elif adv_attack == 'multi_restart_pgd':
             adversarial_tensor = multi_restart_pgd_attack(model, input, label, epsilon=0.5, alpha=0.05, num_iterations=20)
         elif adv_attack == 'nes_pgd_attack':

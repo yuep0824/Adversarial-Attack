@@ -30,13 +30,13 @@ if __name__ == '__main__':
     device = torch.device('cpu')
     num_classes = 10
     
-    adv_attack = 'fgsm'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool
+    adv_attack = 'pgd'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool
     model_configs = [
-        (resnet18, './model/resnet18.pth', 0.25),
-        (resnet50, './model/resnet50.pth', 0.25),
-        (resnet101, './model/resnet101.pth', 0.25),
-        (VGG, './model/vgg19.pth', 0.15),
-        (ViT, './model/vit.pth', 0.1)
+        (resnet34, './model/resnet34_at.pth', 0.3),
+        (resnet101, './model/resnet101_at.pth', 0.3),
+        (VGG, './model/vgg19_at.pth', 0.15),
+        (CNN, './model/cnn_at.pth', 0.15),
+        (ViT, './model/vit_at.pth', 0.1)
     ]
     
     model_list = []
@@ -95,9 +95,9 @@ if __name__ == '__main__':
                 model_weights=model_weights,
                 input_image=input,
                 label=label,
-                epsilon=0.8,
-                alpha=0.1,
-                num_iterations=30
+                epsilon=0.6,
+                alpha=0.08,
+                num_iterations=20
             )
         elif adv_attack == 'fgsm':
             # FGSM Attack
