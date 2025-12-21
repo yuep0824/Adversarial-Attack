@@ -35,7 +35,7 @@ def get_model(model_name, num_classes=10):
 if __name__ == "__main__":
     train_loader, test_loader = load_data(batch_size=256)
 
-    model_name = 'vit'  # 可选：cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+    model_name = 'resnet34'  # 可选：cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
     model = get_model(model_name, num_classes=10).cuda()
     model.load_state_dict(torch.load(f'./model/{model_name}_pre_at.pth'))
 
@@ -44,9 +44,12 @@ if __name__ == "__main__":
 
     num_epochs = 200
     num_adv_epochs = 100
-    adv_sample_ratio = 0.1
+    adv_sample_ratio = 0.05
     best_accuracy = 0.0
     for epoch in tqdm(range(num_epochs), desc="Training"):
+        if epoch < num_adv_epochs:
+            continue
+        
         model.train()
         train_loss = 0.0
         train_correct = 0
@@ -78,8 +81,8 @@ if __name__ == "__main__":
                 selected_images = images[adv_indices]
                 selected_labels = labels[adv_indices]
                 
-                # adv_images = pgd_attack(model, selected_images, selected_labels, criterion, epsilon=0.2, alpha=0.04, steps=5)
-                adv_images = fgsm_attack(model, selected_images, selected_labels, criterion, epsilon=0.5)
+                adv_images = pgd_attack(model, selected_images, selected_labels, criterion, epsilon=0.2, alpha=0.05, steps=5)
+                # adv_images = fgsm_attack(model, selected_images, selected_labels, criterion, epsilon=0.5)
                 adv_outputs = model(adv_images)
                 loss = criterion(adv_outputs, selected_labels)
                 loss.backward()
@@ -130,6 +133,6 @@ if __name__ == "__main__":
 
         print(f"    Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.2f}%")
 
-        if test_accuracy > best_accuracy:
-            torch.save(model.state_dict(), f'./model/{model_name}.pth')
-            best_accuracy = test_accuracy
+        # if test_accuracy > best_accuracy:
+        #     torch.save(model.state_dict(), f'./model/{model_name}.pth')
+        #     best_accuracy = test_accuracy
