@@ -44,7 +44,7 @@ def fgsm_attack(model, input_image, label, criterion, epsilon=0.2):
 
 
 
-def pgd_attack(model, images, labels, criterion, epsilon=0.01, alpha=0.002, steps=10, clamp_min=0.0, clamp_max=1.0):
+def pgd_attack(model, images, labels, criterion, epsilon=0.01, alpha=0.002, steps=10):
     adv_images = images.clone().detach().to(images.device)
     adv_images.requires_grad = True
 
@@ -61,7 +61,7 @@ def pgd_attack(model, images, labels, criterion, epsilon=0.01, alpha=0.002, step
         adv_images.grad.zero_()
 
     adv_images = images + delta
-    adv_images = torch.clamp(adv_images, clamp_min, clamp_max)
+    adv_images = torch.clamp(adv_images, images.min(), images.max())
     
     return adv_images.detach()
 

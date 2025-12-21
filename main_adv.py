@@ -46,20 +46,14 @@ def get_model(model_name, num_classes=10):
     elif model_name == 'wide_resnet':
         model = wide_resnet(num_classes=num_classes)
 
-    model.load_state_dict(torch.load(f'./model/{model_name}.pth', map_location=torch.device('cpu')))
+    model.load_state_dict(torch.load(f'./model/{model_name}_at.pth', map_location=torch.device('cuda')))
 
     return model
 
 if __name__ == '__main__':
-    adv_attack = 'pgd'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary, nes_pgd_attack, multi_restart_pgd, cw_pgd_hybrid_attack
-    attack_model =  'resnet50'  # cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
-    # model = get_model(attack_model, num_classes=10)
-
-    from torchvision import models
-    model = models.resnet50(pretrained=True)
-    num_ftrs = model.fc.in_features
-    model.fc = nn.Linear(num_ftrs, 10) 
-    model.load_state_dict(torch.load(f'resnet50_cifar10_finetuned_fc.pth', map_location=torch.device('cpu')))
+    adv_attack = 'cw_pgd_hybrid_attack'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary, nes_pgd_attack, multi_restart_pgd, cw_pgd_hybrid_attack
+    attack_model =  'resnet34'  # cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+    model = get_model(attack_model, num_classes=10)
 
     if attack_model == 'wide_resnet':
         transform = transforms.Compose([
@@ -71,7 +65,6 @@ if __name__ == '__main__':
             transforms.Normalize((-0.4914/0.2470, -0.4822/0.2435, -0.4465/0.2616), (1.0/0.2470, 1.0/0.2435, 1.0/0.2616)),
             transforms.Resize((32, 32))
         ])
-    
     else :
         transform = transforms.Compose([
             transforms.ToTensor(),

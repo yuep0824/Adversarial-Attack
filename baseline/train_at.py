@@ -35,19 +35,18 @@ def get_model(model_name, num_classes=10):
 if __name__ == "__main__":
     train_loader, test_loader = load_data(batch_size=256)
 
-    model_name = 'cnn'  # 可选：cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+    model_name = 'vit'  # 可选：cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
     model = get_model(model_name, num_classes=10).cuda()
+    model.load_state_dict(torch.load(f'./model/{model_name}_pre_at.pth'))
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=5e-5)
 
     num_epochs = 200
     num_adv_epochs = 100
-    adv_sample_ratio = 0.05
+    adv_sample_ratio = 0.1
     best_accuracy = 0.0
     for epoch in tqdm(range(num_epochs), desc="Training"):
-        print(f"Epoch {epoch+1}/{num_epochs}:")
-
         model.train()
         train_loss = 0.0
         train_correct = 0
@@ -55,9 +54,6 @@ if __name__ == "__main__":
         adv_loss = 0.0
         adv_correct = 0
         adv_total = 0
-
-        if epoch == num_adv_epochs - 1:
-            torch.save(model.state_dict(), f'./model/{model_name}_pre_at.pth')
 
         for images, labels in train_loader:
             images, labels = images.cuda(), labels.cuda()
@@ -82,7 +78,8 @@ if __name__ == "__main__":
                 selected_images = images[adv_indices]
                 selected_labels = labels[adv_indices]
                 
-                adv_images = fgsm_attack(model, selected_images, selected_labels, criterion, epsilon=0.3)
+                # adv_images = pgd_attack(model, selected_images, selected_labels, criterion, epsilon=0.2, alpha=0.04, steps=5)
+                adv_images = fgsm_attack(model, selected_images, selected_labels, criterion, epsilon=0.5)
                 adv_outputs = model(adv_images)
                 loss = criterion(adv_outputs, selected_labels)
                 loss.backward()

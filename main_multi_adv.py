@@ -95,9 +95,9 @@ if __name__ == '__main__':
                 model_weights=model_weights,
                 input_image=input,
                 label=label,
-                epsilon=0.6,
-                alpha=0.08,
-                num_iterations=20
+                epsilon=1.5,
+                alpha=0.1,
+                num_iterations=30
             )
         elif adv_attack == 'fgsm':
             # FGSM Attack
