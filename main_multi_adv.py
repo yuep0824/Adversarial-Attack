@@ -30,7 +30,7 @@ if __name__ == '__main__':
     device = torch.device('cpu')
     num_classes = 10
     
-    adv_attack = 'max_pgd'  # 可选：fgsm, pc_i_fgsm, mask_pgd, deepfool, mask_nes_pgd, max_pgd
+    adv_attack = 'mask_pgd'  # 可选：fgsm, pc_i_fgsm, mask_pgd, deepfool, mask_nes_pgd, max_pgd
     model_configs = [
         (resnet34, './model/resnet34_at.pth', 0.3),
         (resnet101, './model/resnet101_at.pth', 0.3),
@@ -95,9 +95,10 @@ if __name__ == '__main__':
                 model_weights=model_weights,
                 input_image=input,
                 label=label,
-                epsilon=0.8,
-                alpha=0.05,
-                num_iterations=50
+                epsilon=1.2,
+                alpha=0.1,
+                num_iterations=30,
+                attention_ratio=0.2
             )
         elif adv_attack == 'mask_nes_pgd':
             # NES-PGD Attack
@@ -106,10 +107,10 @@ if __name__ == '__main__':
                 model_weights=model_weights,
                 input_image=input,
                 label=label,
-                epsilon=0.6,
-                alpha=0.05,
-                num_iterations=20,
-                attention_ratio=0.05
+                epsilon=1.2,
+                alpha=0.1,
+                num_iterations=30,
+                attention_ratio=0.2
             )
         elif adv_attack == 'max_pgd':
             # Max-PGD Attack
@@ -120,8 +121,8 @@ if __name__ == '__main__':
                 label=label,
                 epsilon=0.8,
                 alpha=0.08,
-                num_iterations=40,
-                attention_ratio=0.1
+                num_iterations=30,
+                attention_ratio=0.2
             )
         elif adv_attack == 'fgsm':
             # FGSM Attack
