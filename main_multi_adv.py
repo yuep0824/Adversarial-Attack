@@ -32,10 +32,10 @@ if __name__ == '__main__':
     
     adv_attack = 'mask_cw_mi_pgd'  # 可选：fgsm, pc_i_fgsm, mask_pgd, deepfool, mask_nes_pgd, max_pgd, mask_cw_mi_pgd
     model_configs = [
-        (resnet34, './model/resnet34_at.pth', 0.3),
-        (resnet101, './model/resnet101_at.pth', 0.3),
+        (resnet34, './model/resnet34_at.pth', 0.25),
+        (resnet50, './model/resnet50_at.pth', 0.25),
+        (resnet101, './model/resnet101_at.pth', 0.25),
         (VGG, './model/vgg19_at.pth', 0.15),
-        (CNN, './model/cnn_at.pth', 0.15),
         (ViT, './model/vit_at.pth', 0.1)
     ]
     
@@ -118,10 +118,10 @@ if __name__ == '__main__':
                 model_weights=model_weights,
                 input_image=input,
                 label=label,
-                epsilon=1.2,
-                alpha=0.1,
+                epsilon=0.8,
+                alpha=0.08,
                 num_iterations=30,
-                attention_ratio=0.03
+                attention_ratio=0.1
             )
         elif adv_attack == 'max_pgd':
             # Max-PGD Attack
