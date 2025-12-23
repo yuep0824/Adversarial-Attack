@@ -24,6 +24,11 @@ from attacks.boundary_attack import BoundaryAttack
 
 from baseline.models import CNN, VGG, ViT
 from baseline.models import resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+from baseline.models1 import densenet121, densenet161, densenet169, googlenet, inception_v3, mobilenet_v2, vgg11_bn, vgg13_bn, vgg16_bn, vgg19_bn
+from baseline.models2 import cifar10_resnet56, cifar10_vgg16_bn, cifar10_mobilenetv2_x1_0, cifar10_shufflenetv2_x2_0
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def get_model(model_name, num_classes=10):
@@ -46,14 +51,71 @@ def get_model(model_name, num_classes=10):
     elif model_name == 'wide_resnet':
         model = wide_resnet(num_classes=num_classes)
 
-    model.load_state_dict(torch.load(f'./model/{model_name}_at.pth', map_location=torch.device('cuda')))
+    model.load_state_dict(torch.load(f'./model/{model_name}_at.pth', map_location=device))
+    model = model.to(device)
+    model.eval()
 
     return model
 
+
+def get_new_model(model_name, num_classes=10):
+    if model_name == 'cifar10_resnet56':
+        model = cifar10_resnet56()
+        model_path = './model/state_dicts/cifar10_resnet56-187c023a.pt'
+    elif model_name == 'cifar10_vgg16_bn':
+        model = cifar10_vgg16_bn()
+        model_path = './model/state_dicts/cifar10_vgg16_bn-6ee7ea24.pt'
+    elif model_name == 'cifar10_mobilenetv2_x1_0':
+        model = cifar10_mobilenetv2_x1_0()
+        model_path = './model/state_dicts/cifar10_mobilenetv2_x1_0-fe6a5b48.pt'
+    elif model_name == 'cifar10_shufflenetv2_x2_0':
+        model = cifar10_shufflenetv2_x2_0()
+        model_path = './model/state_dicts/cifar10_shufflenetv2_x2_0-ec31611c.pt'
+    elif model_name == 'densenet121':
+        model = densenet121(num_classes=num_classes)
+        model_path = './model/state_dicts/densenet121.pt'
+    elif model_name == 'densenet161':  
+        model = densenet161(num_classes=num_classes)
+        model_path = './model/state_dicts/densenet161.pt'
+    elif model_name == 'densenet169':
+        model = densenet169(num_classes=num_classes)
+        model_path = './model/state_dicts/densenet169.pt'
+    elif model_name == 'googlenet':
+        model = googlenet(num_classes=num_classes)
+        model_path = './model/state_dicts/googlenet.pt'
+    elif model_name == 'inception_v3':
+        model = inception_v3(num_classes=num_classes)
+        model_path = './model/state_dicts/inception_v3.pt'
+    elif model_name == 'mobilenet_v2':
+        model = mobilenet_v2(num_classes=num_classes)
+        model_path = './model/state_dicts/mobilenet_v2.pt'
+    elif model_name == 'vgg11_bn':
+        model = vgg11_bn(num_classes=num_classes)
+        model_path = './model/state_dicts/vgg11_bn.pt'
+    elif model_name == 'vgg13_bn':
+        model = vgg13_bn(num_classes=num_classes)
+        model_path = './model/state_dicts/vgg13_bn.pt'
+    elif model_name == 'vgg16_bn':
+        model = vgg16_bn(num_classes=num_classes)
+        model_path = './model/state_dicts/vgg16_bn.pt'
+    elif model_name == 'vgg19_bn':
+        model = vgg19_bn(num_classes=num_classes)
+        model_path = './model/state_dicts/vgg19_bn.pt'
+
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model = model.to(device)
+    model.eval()
+
+    return model
+
+
 if __name__ == '__main__':
-    adv_attack = 'cw_pgd_hybrid_attack'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary, nes_pgd_attack, multi_restart_pgd, cw_pgd_hybrid_attack
-    attack_model =  'resnet34'  # cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
-    model = get_model(attack_model, num_classes=10)
+    adv_attack = 'pgd'  # 可选：fgsm, pc_i_fgsm, pgd, deepfool, cw, boundary, nes_pgd_attack, multi_restart_pgd, cw_pgd_hybrid_attack
+    # attack_model =  'resnet34'  # cnn, vgg19, vit, resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+    # model = get_model(attack_model, num_classes=10)
+
+    attack_model = 'cifar10_resnet56' # cifar10_vgg16_bn, cifar10_mobilenetv2_x1_0, cifar10_shufflenetv2_x2_0, densenet121, densenet161, densenet169, googlenet, inception_v3, mobilenet_v2, vgg11_bn, vgg13_bn, vgg16_bn, vgg19_bn
+    model = get_new_model(attack_model, num_classes=10)
 
     if attack_model == 'wide_resnet':
         transform = transforms.Compose([
@@ -86,7 +148,7 @@ if __name__ == '__main__':
                 image_name, label = line.split()
                 label_dict[image_name] = int(label)
 
-    adv_folder = f"./data/cifar10_{adv_attack}_500/"
+    adv_folder = f"./data/cifar10_{adv_attack}_{attack_model}_500/"
     adv_image_folder = os.path.join(adv_folder, 'images/')
     adv_label_path = os.path.join(adv_folder, 'label.txt')
     os.makedirs(adv_image_folder, exist_ok=True)
@@ -100,15 +162,20 @@ if __name__ == '__main__':
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) / 255.0
         input = cv2.resize(image, (32, 32), interpolation=cv2.INTER_LANCZOS4)
         input = transform(input).unsqueeze(0).float().requires_grad_(True)
+        # 新增：输入移到CUDA
+        input = input.to(device)
 
         label = torch.tensor([label_dict[image_name]])
+        # 新增：标签移到CUDA
+        label = label.to(device)
 
+        # 原有攻击逻辑不变...
         if adv_attack == 'fgsm':
             adversarial_tensor = fgsm_attack(model, input, label, epsilon=0.4)
         elif adv_attack == 'pc_i_fgsm':
             adversarial_tensor = pc_i_fgsm_attack(model, input, label, epsilon=0.1)
         elif adv_attack == 'pgd':
-            adversarial_tensor = pgd_attack(model, input, label, epsilon=0.6, alpha=0.08, num_iterations=20)
+            adversarial_tensor = pgd_attack(model, input, label, epsilon=0.8, alpha=0.1, num_iterations=20, device=device)
         elif adv_attack == 'multi_restart_pgd':
             adversarial_tensor = multi_restart_pgd_attack(model, input, label, epsilon=0.5, alpha=0.05, num_iterations=20)
         elif adv_attack == 'nes_pgd_attack':

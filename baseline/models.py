@@ -7,6 +7,7 @@ import collections.abc
 from itertools import repeat
 from functools import partial
 
+
 class CNN(nn.Module):
     def __init__(self, num_classes=10):
         super(CNN, self).__init__()

@@ -3,10 +3,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def pgd_attack(model, input_image, label, epsilon, alpha, num_iterations):
+def pgd_attack(model, input_image, label, epsilon, alpha, num_iterations, device='cuda'):
     model.eval()
 
     adv_image = input_image.clone()
+    # 确保epsilon/alpha是张量且在CUDA
+    epsilon = torch.tensor(epsilon).to(device)
+    alpha = torch.tensor(alpha).to(device)
+    
     for _ in range(num_iterations):
         model.zero_grad()
 
