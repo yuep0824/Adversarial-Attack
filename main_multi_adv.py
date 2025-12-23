@@ -17,7 +17,7 @@ sys.path.append(".")
 
 from attacks.FGSM import fgsm_attack, multi_model_fgsm_attack
 from attacks.PC_I_FGSM import pc_i_fgsm_attack, multi_model_pc_i_fgsm_attack
-from attacks.PGD import multi_model_pgd_attack, multi_model_nes_pgd_attack, multi_model_max_pgd_attack
+from attacks.PGD import multi_model_pgd_attack, multi_model_nes_pgd_attack, multi_model_max_pgd_attack, multi_model_mask_cw_mi_pgd_attack
 from attacks.DeepFool import deepfool_attack, multi_model_deepfool_attack
 from attacks.CW import CW
 from attacks.boundary_attack import BoundaryAttack
@@ -30,7 +30,7 @@ if __name__ == '__main__':
     device = torch.device('cpu')
     num_classes = 10
     
-    adv_attack = 'mask_pgd'  # 可选：fgsm, pc_i_fgsm, mask_pgd, deepfool, mask_nes_pgd, max_pgd
+    adv_attack = 'mask_cw_mi_pgd'  # 可选：fgsm, pc_i_fgsm, mask_pgd, deepfool, mask_nes_pgd, max_pgd, mask_cw_mi_pgd
     model_configs = [
         (resnet34, './model/resnet34_at.pth', 0.3),
         (resnet101, './model/resnet101_at.pth', 0.3),
@@ -98,7 +98,7 @@ if __name__ == '__main__':
                 epsilon=1.2,
                 alpha=0.1,
                 num_iterations=30,
-                attention_ratio=0.2
+                attention_ratio=0.
             )
         elif adv_attack == 'mask_nes_pgd':
             # NES-PGD Attack
@@ -110,7 +110,18 @@ if __name__ == '__main__':
                 epsilon=1.2,
                 alpha=0.1,
                 num_iterations=30,
-                attention_ratio=0.2
+                attention_ratio=0.03
+            )
+        elif adv_attack == 'mask_cw_mi_pgd':
+            adversarial_tensor = multi_model_mask_cw_mi_pgd_attack(
+                model_list=model_list,
+                model_weights=model_weights,
+                input_image=input,
+                label=label,
+                epsilon=1.2,
+                alpha=0.1,
+                num_iterations=30,
+                attention_ratio=0.03
             )
         elif adv_attack == 'max_pgd':
             # Max-PGD Attack
@@ -122,7 +133,7 @@ if __name__ == '__main__':
                 epsilon=0.8,
                 alpha=0.08,
                 num_iterations=30,
-                attention_ratio=0.2
+                attention_ratio=0.03
             )
         elif adv_attack == 'fgsm':
             # FGSM Attack

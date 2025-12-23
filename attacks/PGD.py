@@ -22,7 +22,6 @@ def pgd_attack(model, input_image, label, epsilon, alpha, num_iterations):
 
 
 def multi_restart_pgd_attack(model, input_image, label, epsilon, alpha, num_iterations, num_restarts=10):
-    """多重启PGD：多次随机初始化，选最优攻击样本，攻击成功率拉满"""
     model.eval()
     device = input_image.device
     
@@ -163,7 +162,7 @@ def cw_pgd_hybrid_attack(model, input_image, label, epsilon, alpha, num_iteratio
 #                 valid_weights.append(model_weights[idx])
     
 #     if len(valid_models) == 0:
-#         print(f"警告：当前样本无分类正确的模型，返回原始图像")
+#         print(f"警告：当前样本无分类正确的模型，返回原始图像")    
 #         return input_image
     
 #     valid_weights = torch.tensor(valid_weights, dtype=torch.float32, device=input_image.device)
@@ -474,6 +473,10 @@ def multi_model_pgd_attack(
     num_iterations=50,    # 迭代次数
     attention_ratio=0.1  # 关注梯度最大的10%像素（内部参数，可调整）
 ):
+
+    kappa = 0.0
+    momentum=0.9
+
     valid_models = []
     valid_weights = []
     input_ori = input_image.clone().detach()
@@ -519,6 +522,8 @@ def multi_model_pgd_attack(
     
     # 3. PGD核心迭代（复用固定的注意力掩码）
     adv_image = input_image.clone()
+    momentum_buffer = torch.zeros_like(adv_image)
+
     for _ in range(num_iterations):
         adv_image = adv_image.clone().detach().requires_grad_(True)
         fusion_gradient = torch.zeros_like(adv_image)
@@ -527,16 +532,129 @@ def multi_model_pgd_attack(
         for idx, model in enumerate(valid_models):
             model.zero_grad()
             output = model(adv_image)
-            loss = nn.CrossEntropyLoss()(output, label)
+            
+            # 1. CW损失函数（核心改进）
+            logit_true = output.gather(1, label.unsqueeze(1)).squeeze(1)
+            logit_other = torch.max(output - 1e4 * F.one_hot(label, num_classes=output.shape[1]), dim=1)[0]
+            cw_loss = torch.max(logit_other - logit_true + kappa, torch.zeros_like(logit_true)).mean()
+            ce_loss = nn.CrossEntropyLoss()(output, label)  # 交叉熵损失（分类错误时损失会上升）
+
+            # 混合损失：CW损失为主，交叉熵损失为辅
+            loss = cw_loss + 0.2 * ce_loss  # 0.2是交叉熵的权重，可调整
             loss.backward()
             fusion_gradient += valid_weights[idx] * adv_image.grad.data.sign()
         
-        # 3.2 复用固定的注意力掩码施加扰动（核心修改）
-        perturbation = alpha * fusion_gradient.sign() * attention_mask
+        # ===== 关键修改2：更新动量缓存 =====
+        # 1. 对当前融合梯度做L1归一化（避免幅值波动）
+        grad_l1_norm = torch.norm(fusion_gradient, p=1, dim=[1,2,3], keepdim=True)
+        grad_normalized = fusion_gradient / (grad_l1_norm + 1e-8)
+        # 2. 动量更新：历史动量*衰减系数 + 归一化当前梯度
+        momentum_buffer = momentum * momentum_buffer + grad_normalized
         
-        # 3.3 投影约束（保留原逻辑）
+        # ===== 关键修改3：用动量计算扰动（替代原融合梯度）=====
+        # 扰动方向由动量的符号决定，仍保留注意力掩码
+        perturbation = alpha * momentum_buffer.sign() * attention_mask
+        # perturbation = alpha * fusion_gradient.sign() * attention_mask
+        
+        # 3.3 投影约束
         adv_image = adv_image + perturbation
         adv_image = torch.clamp(adv_image, input_ori - epsilon, input_ori + epsilon)
+        adv_image = torch.clamp(adv_image, input_ori.min(), input_ori.max())
+        adv_image = adv_image.detach()
+    
+    return adv_image
+
+
+def multi_model_mask_cw_mi_pgd_attack(
+    model_list,          # 参与攻击的模型列表
+    model_weights,       # 各模型的梯度权重（与model_list一一对应）
+    input_image,         # 输入图像张量
+    label,               # 真实标签
+    epsilon=0.5,         # PGD扰动上限
+    alpha=0.05,          # 单次迭代步长
+    num_iterations=50,   # 迭代次数
+    attention_ratio=0.1,    # 关注梯度最大的10%像素（内部参数，可调整）
+    kappa = 0.0,
+    momentum=0.9  
+):
+    valid_models = []
+    valid_weights = []
+    input_ori = input_image.clone().detach()
+    
+    # 1. 筛选分类正确的有效模型（保留原逻辑）
+    for idx, model in enumerate(model_list):
+        model.eval()
+        with torch.no_grad():
+            output = model(input_ori)
+            pred_label = torch.argmax(output, dim=1)
+            if pred_label == label:
+                valid_models.append(model)
+                valid_weights.append(model_weights[idx])
+    
+    if len(valid_models) == 0:
+        print(f"警告：当前样本无分类正确的模型，返回原始图像")
+        return input_image
+    
+    valid_weights = torch.tensor(valid_weights, dtype=torch.float32, device=input_image.device)
+    valid_weights = valid_weights / valid_weights.sum()  # 权重归一化
+    
+    # 2. 预计算固定的注意力掩码（仅计算一次，核心修改）
+    adv_image_init = input_image.clone().detach().requires_grad_(True)
+    fusion_gradient_init = torch.zeros_like(adv_image_init)
+    
+    # 2.1 计算初始的多模型融合梯度
+    for idx, model in enumerate(valid_models):
+        model.zero_grad()
+        output = model(adv_image_init)
+        loss = nn.CrossEntropyLoss()(output, label)
+        loss.backward()
+        fusion_gradient_init += valid_weights[idx] * adv_image_init.grad.data.sign()
+    
+    # 2.2 生成固定的注意力掩码（仅基于初始梯度）
+    grad_abs = torch.abs(fusion_gradient_init)
+    grad_flat = grad_abs.view(grad_abs.shape[0], -1)
+    k = int(grad_flat.shape[1] * attention_ratio)
+    k = max(k, 1)  # 避免k=0
+    threshold = torch.kthvalue(grad_flat, grad_flat.shape[1] - k, dim=1)[0]
+    threshold = threshold.unsqueeze(1).unsqueeze(2).unsqueeze(3)
+    attention_mask = (grad_abs >= threshold).float()  # 固定mask，后续不再修改
+    attention_mask = attention_mask.detach()  # 解除梯度追踪
+    
+    # 3. PGD核心迭代（复用固定的注意力掩码）
+    adv_image = input_image.clone()
+    momentum_buffer = torch.zeros_like(adv_image)
+
+    for _ in range(num_iterations):
+        adv_image = adv_image.clone().detach().requires_grad_(True)
+        fusion_gradient = torch.zeros_like(adv_image)
+        
+        # 3.1 计算当前迭代的多模型融合梯度
+        for idx, model in enumerate(valid_models):
+            model.zero_grad()
+            output = model(adv_image)
+            
+            # 1. CW损失函数（核心改进）
+            logit_true = output.gather(1, label.unsqueeze(1)).squeeze(1)
+            logit_other = torch.max(output - 1e4 * F.one_hot(label, num_classes=output.shape[1]), dim=1)[0]
+            cw_loss = torch.max(logit_other - logit_true + kappa, torch.zeros_like(logit_true)).mean()
+            ce_loss = nn.CrossEntropyLoss()(output, label)  # 交叉熵损失（分类错误时损失会上升）
+
+            # 混合损失：CW损失为主，交叉熵损失为辅
+            loss = cw_loss + 0.2 * ce_loss  # 0.2是交叉熵的权重，可调整
+            loss.backward()
+            fusion_gradient += valid_weights[idx] * adv_image.grad.data.sign()
+        
+        # ===== 关键修改2：更新动量缓存 =====
+        # 1. 对当前融合梯度做L1归一化（避免幅值波动）
+        grad_l1_norm = torch.norm(fusion_gradient, p=1, dim=[1,2,3], keepdim=True)
+        grad_normalized = fusion_gradient / (grad_l1_norm + 1e-8)
+        momentum_buffer = momentum * momentum_buffer + grad_normalized
+        perturbation = alpha * momentum_buffer.sign() * attention_mask
+        
+        # 3.3 投影约束
+        adv_image = adv_image + perturbation
+        adv_image = torch.clamp(adv_image, input_ori - epsilon, input_ori + epsilon)
+        adv_image = torch.clamp(adv_image, input_ori.min(), input_ori.max())
         adv_image = adv_image.detach()
     
     return adv_image
