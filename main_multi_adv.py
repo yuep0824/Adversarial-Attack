@@ -17,26 +17,27 @@ sys.path.append(".")
 
 from attacks.FGSM import fgsm_attack, multi_model_fgsm_attack
 from attacks.PC_I_FGSM import pc_i_fgsm_attack, multi_model_pc_i_fgsm_attack
-from attacks.PGD import multi_model_pgd_attack, multi_model_nes_pgd_attack, multi_model_max_pgd_attack, multi_model_mask_cw_mi_pgd_attack
+from attacks.PGD import multi_model_pgd_attack, multi_model_nes_pgd_attack, multi_model_mask_cw_mi_pgd_attack
 from attacks.DeepFool import deepfool_attack, multi_model_deepfool_attack
 from attacks.CW import CW
 from attacks.boundary_attack import BoundaryAttack
 
 from baseline.models import CNN, VGG, ViT
-from baseline.models import resnet18, resnet34, resnet50, resnet101, resnet152
+from baseline.models import resnet18, resnet34, resnet50, resnet101, resnet152, wide_resnet
+from baseline.models1 import densenet121, densenet161, densenet169, googlenet, inception_v3, mobilenet_v2, vgg11_bn, vgg13_bn, vgg16_bn, vgg19_bn
+from baseline.models2 import cifar10_resnet56, cifar10_vgg16_bn, cifar10_mobilenetv2_x1_0, cifar10_shufflenetv2_x2_0
 
 
 if __name__ == '__main__':
-    device = torch.device('cpu')
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     num_classes = 10
     
-    adv_attack = 'mask_cw_mi_pgd'  # 可选：fgsm, pc_i_fgsm, mask_pgd, deepfool, mask_nes_pgd, max_pgd, mask_cw_mi_pgd
+    adv_attack = 'mask_pgd'  # 可选：fgsm, pc_i_fgsm, mask_pgd, deepfool, mask_nes_pgd, max_pgd, mask_cw_mi_pgd
     model_configs = [
-        (resnet34, './model/resnet34_at.pth', 0.25),
-        (resnet50, './model/resnet50_at.pth', 0.25),
-        (resnet101, './model/resnet101_at.pth', 0.25),
-        (VGG, './model/vgg19_at.pth', 0.15),
-        (ViT, './model/vit_at.pth', 0.1)
+        (densenet121, './model/state_dicts/densenet121.pt', 0.25),
+        (densenet169, './model/state_dicts/densenet169.pt', 0.3),
+        (vgg13_bn, './model/state_dicts/vgg13_bn.pt', 0.25),
+        (cifar10_mobilenetv2_x1_0, './model/state_dicts/cifar10_mobilenetv2_x1_0-fe6a5b48.pt', 0.2)
     ]
     
     model_list = []
@@ -48,9 +49,9 @@ if __name__ == '__main__':
             model.eval()
             model_list.append(model)
             model_weights.append(grad_weight)
-            print(f"成功加载模型：{model_cls.__name__}")
+            print(f"成功加载模型：{weight_path}")
         except Exception as e:
-            print(f"加载模型{model_cls.__name__}失败：{e}，跳过该模型")
+            print(f"加载模型{weight_path}失败：{e}，跳过该模型")
     
     
     transform = transforms.Compose([
@@ -84,9 +85,9 @@ if __name__ == '__main__':
         image = cv2.imread(img_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) / 255.0
         input = cv2.resize(image, (32, 32), interpolation=cv2.INTER_LANCZOS4)
-        input = transform(input).unsqueeze(0).float().requires_grad_(True)
+        input = transform(input).unsqueeze(0).float().to(device).requires_grad_(True)
 
-        label = torch.tensor([label_dict[image_name]])
+        label = torch.tensor([label_dict[image_name]], device=device)
 
         if adv_attack == 'mask_pgd':
             # PGD Attack
@@ -122,18 +123,6 @@ if __name__ == '__main__':
                 alpha=0.08,
                 num_iterations=30,
                 attention_ratio=0.1
-            )
-        elif adv_attack == 'max_pgd':
-            # Max-PGD Attack
-            adversarial_tensor = multi_model_max_pgd_attack(
-                model_list=model_list,
-                model_weights=model_weights,
-                input_image=input,
-                label=label,
-                epsilon=0.8,
-                alpha=0.08,
-                num_iterations=30,
-                attention_ratio=0.03
             )
         elif adv_attack == 'fgsm':
             # FGSM Attack
@@ -172,8 +161,8 @@ if __name__ == '__main__':
             with torch.no_grad():
                 adv_output = model(adversarial_tensor)
                 _, adv_label = torch.max(adv_output.data, 1)
-                model_name = model_configs[idx][0].__name__
-                print(f"模型{model_name} - GT Label: {label.item()}, Adv Label: {adv_label.item()}")
+                model_name = model_configs[idx][0]
+                print(f"模型{str(model_name)} - GT Label: {label.item()}, Adv Label: {adv_label.item()}")
 
 
         adv_img = adversarial_tensor.detach().squeeze(0).cpu()

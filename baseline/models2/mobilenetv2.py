@@ -242,6 +242,7 @@ class MobileNetV2(nn.Module):
         x = self.classifier(x)
         return x
 
+    
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
 

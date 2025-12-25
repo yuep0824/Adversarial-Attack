@@ -7,7 +7,6 @@ def pgd_attack(model, input_image, label, epsilon, alpha, num_iterations, device
     model.eval()
 
     adv_image = input_image.clone()
-    # 确保epsilon/alpha是张量且在CUDA
     epsilon = torch.tensor(epsilon).to(device)
     alpha = torch.tensor(alpha).to(device)
     
@@ -21,6 +20,166 @@ def pgd_attack(model, input_image, label, epsilon, alpha, num_iterations, device
         loss.backward()
         gradient = adv_image.grad.data.sign()
         adv_image = torch.clamp(adv_image + alpha * gradient, input_image - epsilon, input_image + epsilon)
+
+    return adv_image
+
+
+def pgd_attack_with_mask(
+    model, 
+    input_image, 
+    label, 
+    epsilon, 
+    alpha, 
+    num_iterations, 
+    n_blocks,  # 选择梯度最大的前n个4×4不重叠块
+    device='cuda'
+):
+    model.eval()
+    input_image = input_image.to(device)
+    label = label.to(device)
+    epsilon = torch.tensor(epsilon, device=device)
+    alpha = torch.tensor(alpha, device=device)
+    B, C, H, W = input_image.shape
+
+    # -------------------------- 步骤1：计算原始图像的梯度 --------------------------
+    input_for_grad = input_image.clone().detach().requires_grad_(True)  # 叶子张量
+    output = model(input_for_grad)
+    loss = nn.CrossEntropyLoss()(output, label)
+    loss.backward()
+    grad = input_for_grad.grad.data  # [B, C, H, W]
+
+    # -------------------------- 步骤2：筛选梯度最大的前n个4×4不重叠块 --------------------------
+    grad_sum = grad.abs().sum(dim=1, keepdim=True)  # [B, 1, H, W]
+    
+    # 兼容非4整数倍尺寸：自动截断到最近的4的倍数（忽略最后不足4的行/列）
+    H_trunc = (H // 4) * 4
+    W_trunc = (W // 4) * 4
+    grad_sum_trunc = grad_sum[..., :H_trunc, :W_trunc]  # 截断梯度图
+    num_h_blocks = H_trunc // 4
+    num_w_blocks = W_trunc // 4
+    total_blocks = num_h_blocks * num_w_blocks
+    
+    # 校验n_blocks的合法性
+    if n_blocks > total_blocks:
+        print(f"警告：n_blocks({n_blocks})超过总块数({total_blocks})，自动调整为{total_blocks}")
+        n_blocks = total_blocks
+
+    # 拆分4×4不重叠块并计算块梯度分数
+    grad_blocks = grad_sum_trunc.unfold(dimension=2, size=4, step=4).unfold(dimension=3, size=4, step=4)
+    block_scores = grad_blocks.sum(dim=[4, 5])  # [B, 1, num_h_blocks, num_w_blocks]
+    block_scores_flat = block_scores.flatten(start_dim=2)  # [B, 1, total_blocks]
+    _, top_block_indices = torch.topk(block_scores_flat, k=n_blocks, dim=2)
+
+    # -------------------------- 步骤3：生成攻击区域的mask --------------------------
+    mask = torch.zeros_like(input_image, device=device)
+    for b in range(B):  # 遍历每个batch
+        for flat_idx in top_block_indices[b, 0]:  # 遍历top-n块索引
+            h_block_idx = flat_idx // num_w_blocks
+            w_block_idx = flat_idx % num_w_blocks
+            # 计算块的像素坐标
+            h_start = h_block_idx * 4
+            h_end = h_start + 4
+            w_start = w_block_idx * 4
+            w_end = w_start + 4
+            # 标记攻击区域（所有通道）
+            mask[b, :, h_start:h_end, w_start:w_end] = 1.0
+
+    # -------------------------- 带mask的PGD迭代攻击（核心修复） --------------------------
+    adv_image = input_image.clone().detach()  # 初始化为叶子张量
+    for _ in range(num_iterations):
+        # 每次迭代重新创建叶子张量，确保梯度可追踪
+        adv_image.requires_grad_(True)  
+        model.zero_grad()
+        
+        # 前向传播+计算损失
+        output = model(adv_image)
+        loss = nn.CrossEntropyLoss()(output, label)
+        
+        # 反向传播计算梯度
+        loss.backward()
+        
+        # 安全获取梯度（仅mask区域生效）
+        with torch.no_grad():  # 禁用梯度，避免污染
+            grad_adv = adv_image.grad.sign() * mask  # 无需.data，新版PyTorch推荐直接用tensor
+            
+            # 梯度上升更新（必须detach，保持叶子张量属性）
+            adv_image = adv_image + alpha * grad_adv
+            
+            # L∞约束：扰动不超过epsilon
+            adv_image = torch.clamp(adv_image, input_image - epsilon, input_image + epsilon)
+            adv_image = torch.clamp(adv_image, input_image.min(), input_image.max())
+            
+            # 重新转为叶子张量（关键：detach后才能继续追踪梯度）
+            adv_image = adv_image.detach()
+
+    return adv_image
+
+
+def mask_block_attack(
+    model, 
+    input_image, 
+    label, 
+    n_blocks=8,  # 选择梯度最大的前n个4×4不重叠块
+    device='cuda',
+):
+    white_value = input_image.max()
+    model.eval()
+    input_image = input_image.to(device)
+    label = label.to(device)
+    B, C, H, W = input_image.shape
+
+    # -------------------------- 步骤1：计算原始图像的梯度 --------------------------
+    input_for_grad = input_image.clone().detach().requires_grad_(True)  # 叶子张量
+    output = model(input_for_grad)
+    loss = nn.CrossEntropyLoss()(output, label)
+    loss.backward()
+    grad = input_for_grad.grad.data  # [B, C, H, W]
+
+    # -------------------------- 步骤2：筛选梯度最大的前n个4×4不重叠块 --------------------------
+    grad_sum = grad.abs().sum(dim=1, keepdim=True)  # [B, 1, H, W]
+    
+    # 兼容非4整数倍尺寸：自动截断到最近的4的倍数（忽略最后不足4的行/列）
+    H_trunc = (H // 4) * 4
+    W_trunc = (W // 4) * 4
+    grad_sum_trunc = grad_sum[..., :H_trunc, :W_trunc]  # 截断梯度图
+    num_h_blocks = H_trunc // 4
+    num_w_blocks = W_trunc // 4
+    total_blocks = num_h_blocks * num_w_blocks
+    
+    # 校验n_blocks的合法性
+    if n_blocks > total_blocks:
+        print(f"警告：n_blocks({n_blocks})超过总块数({total_blocks})，自动调整为{total_blocks}")
+        n_blocks = total_blocks
+
+    # 拆分4×4不重叠块并计算块梯度分数
+    grad_blocks = grad_sum_trunc.unfold(dimension=2, size=4, step=4).unfold(dimension=3, size=4, step=4)
+    block_scores = grad_blocks.sum(dim=[4, 5])  # [B, 1, num_h_blocks, num_w_blocks]
+    block_scores_flat = block_scores.flatten(start_dim=2)  # [B, 1, total_blocks]
+    _, top_block_indices = torch.topk(block_scores_flat, k=n_blocks, dim=2)
+
+    # -------------------------- 步骤3：生成攻击区域的mask --------------------------
+    mask = torch.zeros_like(input_image, device=device)
+    for b in range(B):  # 遍历每个batch
+        for flat_idx in top_block_indices[b, 0]:  # 遍历top-n块索引
+            h_block_idx = flat_idx // num_w_blocks
+            w_block_idx = flat_idx % num_w_blocks
+            # 计算块的像素坐标
+            h_start = h_block_idx * 4
+            h_end = h_start + 4
+            w_start = w_block_idx * 4
+            w_end = w_start + 4
+            # 标记攻击区域（所有通道）
+            mask[b, :, h_start:h_end, w_start:w_end] = 1.0
+
+    # -------------------------- 核心修改：将mask区域直接设为白块 --------------------------
+    adv_image = input_image.clone().detach()
+    with torch.no_grad():  # 禁用梯度计算，提升效率
+        # 将mask为1的区域设为白块，其余区域保留原图
+        white_tensor = torch.tensor(white_value, device=device, dtype=adv_image.dtype)
+        adv_image = torch.where(mask == 1.0, white_tensor, adv_image)
+        
+        # 确保图像像素值在合法范围（根据原图的取值范围约束）
+        adv_image = torch.clamp(adv_image, input_image.min(), input_image.max())
 
     return adv_image
 
@@ -139,224 +298,6 @@ def cw_pgd_hybrid_attack(model, input_image, label, epsilon, alpha, num_iteratio
     return adv_image
 
 
-# def multi_model_pgd_attack(
-#     model_list,
-#     model_weights,
-#     input_image,
-#     label,
-#     epsilon=0.5,
-#     alpha=0.05,
-#     num_iterations=50
-# ):
-#     attention_ratio = 0.05  # 关注梯度最大的10%像素
-#     momentum = 0.9         # MIM动量系数（经典值，可调整0.8-0.95）
-    
-#     valid_models = []
-#     valid_weights = []
-#     input_ori = input_image.clone().detach()
-    
-#     # 1. 筛选分类正确的有效模型（保留原逻辑）
-#     for idx, model in enumerate(model_list):
-#         model.eval()
-#         with torch.no_grad():
-#             output = model(input_ori)
-#             pred_label = torch.argmax(output, dim=1)
-#             if pred_label == label:
-#                 valid_models.append(model)
-#                 valid_weights.append(model_weights[idx])
-    
-#     if len(valid_models) == 0:
-#         print(f"警告：当前样本无分类正确的模型，返回原始图像")    
-#         return input_image
-    
-#     valid_weights = torch.tensor(valid_weights, dtype=torch.float32, device=input_image.device)
-#     valid_weights = valid_weights / valid_weights.sum()  # 权重归一化
-    
-#     # 2. 预计算固定的注意力掩码（仅计算一次，保留原逻辑）
-#     adv_image_init = input_image.clone().detach().requires_grad_(True)
-#     fusion_gradient_init = torch.zeros_like(adv_image_init)
-    
-#     # 2.1 计算初始的多模型融合梯度
-#     for idx, model in enumerate(valid_models):
-#         model.zero_grad()
-#         output = model(adv_image_init)
-#         loss = nn.CrossEntropyLoss()(output, label)
-#         loss.backward()
-#         fusion_gradient_init += valid_weights[idx] * adv_image_init.grad.data.sign()
-    
-#     # 2.2 生成固定的注意力掩码（仅基于初始梯度）
-#     grad_abs = torch.abs(fusion_gradient_init)
-#     grad_flat = grad_abs.view(grad_abs.shape[0], -1)
-#     k = int(grad_flat.shape[1] * attention_ratio)
-#     k = max(k, 1)  # 避免k=0
-#     threshold = torch.kthvalue(grad_flat, grad_flat.shape[1] - k, dim=1)[0]
-#     threshold = threshold.unsqueeze(1).unsqueeze(2).unsqueeze(3)
-#     attention_mask = (grad_abs >= threshold).float()
-#     attention_mask = attention_mask.detach()
-    
-#     # 3. PGD核心迭代（引入MIM动量机制 + 复用固定注意力掩码）
-#     adv_image = input_image.clone()
-#     grad_momentum = torch.zeros_like(adv_image).to(input_image.device)
-    
-#     for _ in range(num_iterations):
-#         adv_image = adv_image.clone().detach().requires_grad_(True)
-#         fusion_gradient = torch.zeros_like(adv_image)
-        
-#         # 3.1 计算当前迭代的多模型融合梯度（保留原逻辑）
-#         for idx, model in enumerate(valid_models):
-#             model.zero_grad()
-#             output = model(adv_image)
-            
-#             logit_true = output.gather(1, label.unsqueeze(1)).squeeze(1)  # 正确标签logit
-#             logit_other = torch.max(output - 1e4 * F.one_hot(label, num_classes=output.shape[1]), dim=1)[0]  # 最大错误标签logit
-#             loss = torch.max(logit_other - logit_true + 0.1, torch.zeros_like(logit_true)).mean()  # CW损失（kappa=0.1）
-#             loss.backward()
-
-#             # loss = nn.CrossEntropyLoss()(output, label)
-#             # loss.backward()
-#             fusion_gradient += valid_weights[idx] * adv_image.grad.data  # 注意：此处不再提前取sign，保留幅值用于动量计算
-        
-#         # 3.2 MIM动量梯度更新（核心新增逻辑）
-#         # 归一化当前梯度（避免梯度幅值波动影响动量）
-#         grad_norm = torch.norm(fusion_gradient.view(fusion_gradient.shape[0], -1), p=1, dim=1).view(-1, 1, 1, 1)
-#         grad_norm = torch.clamp(grad_norm, min=1e-12)  # 防止除零
-#         normalized_grad = fusion_gradient / grad_norm
-#         # 累积动量：历史动量 + 当前归一化梯度
-#         grad_momentum = momentum * grad_momentum + normalized_grad
-#         # 取动量梯度的符号（用于扰动更新）
-#         momentum_grad_sign = grad_momentum.sign()
-        
-#         # 3.3 施加扰动：动量梯度 × 固定注意力掩码（核心修改）
-#         perturbation = alpha * momentum_grad_sign * attention_mask
-        
-#         # 3.4 投影约束（保留原逻辑）
-#         adv_image = adv_image + perturbation
-#         adv_image = torch.clamp(adv_image, input_ori - epsilon, input_ori + epsilon)
-#         adv_image = adv_image.detach()
-    
-#     return adv_image
-
-
-def multi_model_max_pgd_attack(
-    model_list,
-    model_weights,
-    input_image,
-    label,
-    epsilon=0.8,          # CIFAR10最优默认：8/255≈0.0314（L∞扰动上限）
-    alpha=0.08,          # CIFAR10最优默认：epsilon/10≈0.00314
-    num_iterations=40,      # CIFAR10最优默认：40轮迭代（平衡效果与速度）
-    attention_ratio=0.1,   # CIFAR10最优默认：15%像素（32×32图像更小，需稍大比例）
-    momentum_start=0.5,     # 自适应动量起始值
-    momentum_end=0.95,      # 自适应动量终止值
-    gaussian_sigma=1.0,     # 高斯平滑核sigma（适配32×32）
-    cw_kappa=0.1            # CW损失kappa值（CIFAR10最优）
-):
-    # -------------------------- 1. 适配CIFAR10的高斯平滑核生成 --------------------------
-    device = input_image.device
-    c = input_image.shape[1]  # CIFAR10为3通道
-    kernel_size = 3           # 3×3核适配32×32图像（避免过度平滑）
-    # 生成1D高斯核
-    kernel_1d = torch.exp(-torch.arange(-(kernel_size//2), kernel_size//2+1)**2 / (2 * gaussian_sigma**2))
-    kernel_1d = kernel_1d / kernel_1d.sum()
-    # 扩展为2D高斯核
-    kernel_2d = kernel_1d.view(1, 1, kernel_size, 1) * kernel_1d.view(1, 1, 1, kernel_size)
-    # 适配多通道（分组卷积）
-    gaussian_kernel = kernel_2d.repeat(c, 1, 1, 1).to(device)
-    
-    valid_models = []
-    valid_weights = []
-    input_ori = input_image.clone().detach()
-    
-    # 2. 筛选分类正确的有效模型（保留原逻辑）
-    for idx, model in enumerate(model_list):
-        model.eval()
-        with torch.no_grad():
-            output = model(input_ori)
-            pred_label = torch.argmax(output, dim=1)
-            if pred_label == label:
-                valid_models.append(model)
-                valid_weights.append(model_weights[idx])
-    
-    if len(valid_models) == 0:
-        print(f"警告：当前样本无分类正确的模型，返回原始图像")
-        return input_image
-    
-    valid_weights = torch.tensor(valid_weights, dtype=torch.float32, device=device)
-    valid_weights = valid_weights / valid_weights.sum()  # 权重归一化
-    
-    # 3. 预计算固定的注意力掩码（保留原逻辑）
-    adv_image_init = input_image.clone().detach().requires_grad_(True)
-    fusion_gradient_init = torch.zeros_like(adv_image_init)
-    
-    # 3.1 计算初始的多模型融合梯度
-    for idx, model in enumerate(valid_models):
-        model.zero_grad()
-        output = model(adv_image_init)
-        loss = nn.CrossEntropyLoss()(output, label)
-        loss.backward()
-        fusion_gradient_init += valid_weights[idx] * adv_image_init.grad.data.sign()
-    
-    # 3.2 生成固定的注意力掩码（仅基于初始梯度）
-    grad_abs = torch.abs(fusion_gradient_init)
-    grad_flat = grad_abs.view(grad_abs.shape[0], -1)
-    k = int(grad_flat.shape[1] * attention_ratio)
-    k = max(k, 1)  # 避免k=0
-    threshold = torch.kthvalue(grad_flat, grad_flat.shape[1] - k, dim=1)[0]
-    threshold = threshold.unsqueeze(1).unsqueeze(2).unsqueeze(3)
-    attention_mask = (grad_abs >= threshold).float()
-    attention_mask = attention_mask.detach()
-    
-    # 4. PGD核心迭代（新增：自适应动量 + 梯度平滑）
-    adv_image = input_image.clone()
-    grad_momentum = torch.zeros_like(adv_image).to(device)
-    
-    for i in range(num_iterations):
-        # -------------------------- 新增：自适应动量计算 --------------------------
-        momentum = momentum_start + (momentum_end - momentum_start) * min(i / (num_iterations/2), 1.0)
-        
-        adv_image = adv_image.clone().detach().requires_grad_(True)
-        fusion_gradient = torch.zeros_like(adv_image)
-        
-        # 4.1 计算当前迭代的多模型融合梯度（保留CW损失逻辑）
-        for idx, model in enumerate(valid_models):
-            model.zero_grad()
-            output = model(adv_image)
-            
-            logit_true = output.gather(1, label.unsqueeze(1)).squeeze(1)  # 正确标签logit
-            logit_other = torch.max(output - 1e4 * F.one_hot(label, num_classes=output.shape[1]), dim=1)[0]  # 最大错误标签logit
-            loss = torch.max(logit_other - logit_true + cw_kappa, torch.zeros_like(logit_true)).mean()  # CW损失
-            loss.backward()
-
-            fusion_gradient += valid_weights[idx] * adv_image.grad.data  # 保留幅值用于动量计算
-        
-        # 4.2 MIM动量梯度更新（保留核心逻辑）
-        grad_norm = torch.norm(fusion_gradient.view(fusion_gradient.shape[0], -1), p=1, dim=1).view(-1, 1, 1, 1)
-        grad_norm = torch.clamp(grad_norm, min=1e-12)  # 防止除零
-        normalized_grad = fusion_gradient / grad_norm
-        grad_momentum = momentum * grad_momentum + normalized_grad
-        
-        # -------------------------- 新增：梯度平滑去噪 --------------------------
-        # 对动量梯度做高斯平滑，消除高频噪声（适配32×32图像）
-        # 使用分组卷积保证各通道独立平滑，padding=1保持尺寸不变
-        grad_momentum_smoothed = F.conv2d(
-            grad_momentum, 
-            gaussian_kernel, 
-            padding=kernel_size//2, 
-            groups=c
-        )
-        momentum_grad_sign = grad_momentum_smoothed.sign()
-        
-        # 4.3 施加扰动：动量梯度 × 固定注意力掩码
-        perturbation = alpha * momentum_grad_sign * attention_mask
-        
-        # 4.4 投影约束（保留原逻辑，适配CIFAR10归一化后范围）
-        adv_image = adv_image + perturbation
-        adv_image = torch.clamp(adv_image, input_ori - epsilon, input_ori + epsilon)
-        adv_image = adv_image.detach()
-    
-    return adv_image
-
-
 def multi_model_nes_pgd_attack(
     model_list,          # 参与攻击的模型列表
     model_weights,       # 各模型的梯度权重（与model_list一一对应）
@@ -470,22 +411,20 @@ def multi_model_nes_pgd_attack(
 def multi_model_pgd_attack(
     model_list,          # 参与攻击的模型列表
     model_weights,       # 各模型的梯度权重（与model_list一一对应）
-    input_image,         # 输入图像张量
-    label,               # 真实标签
+    input_image,         # 输入图像张量（已在CUDA上）
+    label,               # 真实标签（已在CUDA上）
     epsilon=0.5,         # PGD扰动上限
     alpha=0.05,          # 单次迭代步长
     num_iterations=50,    # 迭代次数
-    attention_ratio=0.1  # 关注梯度最大的10%像素（内部参数，可调整）
+    attention_ratio=0.1  # 关注梯度最大的10%像素
 ):
-
-    kappa = 0.0
-    momentum=0.9
+    device = input_image.device  # 从输入张量获取设备（保证统一）
 
     valid_models = []
     valid_weights = []
     input_ori = input_image.clone().detach()
     
-    # 1. 筛选分类正确的有效模型（保留原逻辑）
+    # 1. 筛选分类正确的有效模型
     for idx, model in enumerate(model_list):
         model.eval()
         with torch.no_grad():
@@ -499,10 +438,11 @@ def multi_model_pgd_attack(
         print(f"警告：当前样本无分类正确的模型，返回原始图像")
         return input_image
     
-    valid_weights = torch.tensor(valid_weights, dtype=torch.float32, device=input_image.device)
-    valid_weights = valid_weights / valid_weights.sum()  # 权重归一化
+    # 权重归一化并移到CUDA
+    valid_weights = torch.tensor(valid_weights, dtype=torch.float32, device=device)
+    valid_weights = valid_weights / valid_weights.sum()
     
-    # 2. 预计算固定的注意力掩码（仅计算一次，核心修改）
+    # 2. 预计算固定的注意力掩码（仅计算一次）
     adv_image_init = input_image.clone().detach().requires_grad_(True)
     fusion_gradient_init = torch.zeros_like(adv_image_init)
     
@@ -514,56 +454,37 @@ def multi_model_pgd_attack(
         loss.backward()
         fusion_gradient_init += valid_weights[idx] * adv_image_init.grad.data.sign()
     
-    # 2.2 生成固定的注意力掩码（仅基于初始梯度）
+    # 2.2 生成固定的注意力掩码（所有操作在CUDA上）
     grad_abs = torch.abs(fusion_gradient_init)
     grad_flat = grad_abs.view(grad_abs.shape[0], -1)
     k = int(grad_flat.shape[1] * attention_ratio)
     k = max(k, 1)  # 避免k=0
+    # kthvalue结果移到CUDA
     threshold = torch.kthvalue(grad_flat, grad_flat.shape[1] - k, dim=1)[0]
-    threshold = threshold.unsqueeze(1).unsqueeze(2).unsqueeze(3)
-    attention_mask = (grad_abs >= threshold).float()  # 固定mask，后续不再修改
+    threshold = threshold.unsqueeze(1).unsqueeze(2).unsqueeze(3).to(device)
+    attention_mask = (grad_abs >= threshold).float()  # 固定mask
     attention_mask = attention_mask.detach()  # 解除梯度追踪
     
     # 3. PGD核心迭代（复用固定的注意力掩码）
     adv_image = input_image.clone()
-    momentum_buffer = torch.zeros_like(adv_image)
 
     for _ in range(num_iterations):
         adv_image = adv_image.clone().detach().requires_grad_(True)
-        fusion_gradient = torch.zeros_like(adv_image)
+        fusion_gradient = torch.zeros_like(adv_image).to(device)
         
         # 3.1 计算当前迭代的多模型融合梯度
         for idx, model in enumerate(valid_models):
             model.zero_grad()
             output = model(adv_image)
-            
-            # 1. CW损失函数（核心改进）
-            logit_true = output.gather(1, label.unsqueeze(1)).squeeze(1)
-            logit_other = torch.max(output - 1e4 * F.one_hot(label, num_classes=output.shape[1]), dim=1)[0]
-            cw_loss = torch.max(logit_other - logit_true + kappa, torch.zeros_like(logit_true)).mean()
-            ce_loss = nn.CrossEntropyLoss()(output, label)  # 交叉熵损失（分类错误时损失会上升）
-
-            # 混合损失：CW损失为主，交叉熵损失为辅
-            loss = cw_loss + 0.2 * ce_loss  # 0.2是交叉熵的权重，可调整
+            loss = nn.CrossEntropyLoss()(output, label)
             loss.backward()
             fusion_gradient += valid_weights[idx] * adv_image.grad.data.sign()
         
-        # ===== 关键修改2：更新动量缓存 =====
-        # 1. 对当前融合梯度做L1归一化（避免幅值波动）
-        grad_l1_norm = torch.norm(fusion_gradient, p=1, dim=[1,2,3], keepdim=True)
-        grad_normalized = fusion_gradient / (grad_l1_norm + 1e-8)
-        # 2. 动量更新：历史动量*衰减系数 + 归一化当前梯度
-        momentum_buffer = momentum * momentum_buffer + grad_normalized
-        
-        # ===== 关键修改3：用动量计算扰动（替代原融合梯度）=====
-        # 扰动方向由动量的符号决定，仍保留注意力掩码
-        perturbation = alpha * momentum_buffer.sign() * attention_mask
-        # perturbation = alpha * fusion_gradient.sign() * attention_mask
-        
-        # 3.3 投影约束
+        # 计算扰动并投影约束
+        perturbation = alpha * fusion_gradient.sign() * attention_mask
         adv_image = adv_image + perturbation
         adv_image = torch.clamp(adv_image, input_ori - epsilon, input_ori + epsilon)
-        adv_image = torch.clamp(adv_image, input_ori.min(), input_ori.max())
+        adv_image = torch.clamp(adv_image, input_ori.min(), input_ori.max())  # 像素值范围约束
         adv_image = adv_image.detach()
     
     return adv_image
